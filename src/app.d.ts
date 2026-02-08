@@ -8,6 +8,9 @@ declare global {
 		// interface PageState {}
 		// interface Platform {}
 	}
+
+	const __GIT_HASH__: string;
+	const __GITHUB_URL__: string;
 }
 
 export {};
