@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { GeistPixelSquare } from 'geist/font/pixel';
 	import confetti from 'canvas-confetti';
 	import { dev } from '$app/environment';
 	import { browser } from '$app/environment';
@@ -260,7 +261,7 @@
 <!-- Navbar -->
 <nav class="fixed top-0 left-0 right-0 py-4 px-6 border-b border-border bg-background/80 backdrop-blur-sm z-40" style="font-family: 'Geist Sans', sans-serif;">
 	<div class="flex items-center justify-between max-w-6xl mx-auto">
-		<h1 class="text-lg font-semibold text-foreground">🍅 Pomo Cook</h1>
+		<h1 class="text-lg font-semibold text-foreground ">Pomo</h1>
 		<div class="flex items-center gap-4">
 			<div class="text-sm text-muted-foreground">
 				🍅 {sessionCount} today
@@ -305,12 +306,40 @@
 			</Button>
 		</div>
 
-		<!-- Timer display -->
-		<div
-			class="text-9xl font-bold tracking-wider text-center tabular-nums"
-			style="font-variant-numeric: tabular-nums;"
-		>
-			{formattedTime()}
+		<!-- Circular progress indicator -->
+		<div class="relative w-80 h-80 flex items-center justify-center">
+			<svg class="absolute w-full h-full -rotate-90" viewBox="0 0 200 200">
+				<!-- Background circle -->
+				<circle
+					cx="100"
+					cy="100"
+					r="90"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="8"
+					class="text-muted-foreground/20"
+				/>
+				<!-- Progress circle -->
+				<circle
+					cx="100"
+					cy="100"
+					r="90"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="8"
+					stroke-linecap="round"
+					class="text-primary transition-all duration-300"
+					stroke-dasharray="565.48"
+					stroke-dashoffset={565.48 - (565.48 * progress()) / 100}
+				/>
+			</svg>
+			<!-- Timer display -->
+			<div
+				class="text-7xl font-bold tracking-wider text-center tabular-nums z-10"
+				style="font-variant-numeric: tabular-nums;"
+			>
+				{formattedTime()}
+			</div>
 		</div>
 
 		<!-- Control buttons -->
