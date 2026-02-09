@@ -30,5 +30,8 @@ export default defineConfig({
 	define: {
 		__GIT_HASH__: JSON.stringify(gitHash),
 		__GITHUB_URL__: JSON.stringify(githubUrl)
+	},
+	ssr: {
+		noExternal: ['bits-ui']
 	}
 });

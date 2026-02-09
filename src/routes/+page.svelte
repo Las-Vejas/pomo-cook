@@ -1,22 +1,52 @@
 <script lang="ts">
 	import confetti from 'canvas-confetti';
 	import { dev } from '$app/environment';
+	import { browser } from '$app/environment';
+	import { Button } from '$lib/components/ui/button';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 
 	let mode = $state<'pomodoro' | 'short' | 'long'>('pomodoro');
 	let isRunning = $state(false);
 	let seconds = $state(25 * 60); // Start with 25 minutes
 
-	const durations = {
-		pomodoro: 25 * 60,
-		short: 5 * 60,
-		long: 15 * 60
-	};
+	// Session tracking
+	let sessionCount = $state(0);
+	let consecutivePomodoros = $state(0);
+
+	// Settings
+	let autoStartBreaks = $state(false);
+	let autoStartPomodoro = $state(false);
+	let customDurations = $state({
+		pomodoro: 25,
+		short: 5,
+		long: 15
+	});
+
+	// UI state
+	let showSettings = $state(false);
+
+	// Computed durations in seconds
+	const durations = $derived({
+		pomodoro: customDurations.pomodoro * 60,
+		short: customDurations.short * 60,
+		long: customDurations.long * 60
+	});
 
 	// Format time as MM:SS
 	const formattedTime = $derived(() => {
 		const mins = Math.floor(seconds / 60);
 		const secs = seconds % 60;
 		return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+	});
+
+	// Calculate progress for countdown ring
+	const progress = $derived(() => {
+		const total = durations[mode];
+		const remaining = seconds;
+		return (remaining / total) * 100;
 	});
 
 	// Celebration confetti effect
@@ -50,19 +80,134 @@
 		}, 250);
 	}
 
+	// localStorage helpers
+	function loadSessionCount() {
+		if (!browser) return;
+		try {
+			const stored = localStorage.getItem('pomo-session');
+			if (stored) {
+				const data = JSON.parse(stored);
+				const today = new Date().toDateString();
+				if (data.date === today) {
+					sessionCount = data.count;
+				} else {
+					sessionCount = 0;
+					saveSessionCount();
+				}
+			}
+		} catch (e) {
+			console.error('Failed to load session count:', e);
+		}
+	}
+
+	function saveSessionCount() {
+		if (!browser) return;
+		try {
+			localStorage.setItem(
+				'pomo-session',
+				JSON.stringify({
+					count: sessionCount,
+					date: new Date().toDateString()
+				})
+			);
+		} catch (e) {
+			console.error('Failed to save session count:', e);
+		}
+	}
+
+	function loadSettings() {
+		if (!browser) return;
+		try {
+			const stored = localStorage.getItem('pomo-settings');
+			if (stored) {
+				const data = JSON.parse(stored);
+				if (data.autoStartBreaks !== undefined) autoStartBreaks = data.autoStartBreaks;
+				if (data.autoStartPomodoro !== undefined) autoStartPomodoro = data.autoStartPomodoro;
+				if (data.customDurations) {
+					customDurations = { ...customDurations, ...data.customDurations };
+				}
+			}
+		} catch (e) {
+			console.error('Failed to load settings:', e);
+		}
+	}
+
+	function saveSettings() {
+		if (!browser) return;
+		try {
+			localStorage.setItem(
+				'pomo-settings',
+				JSON.stringify({
+					autoStartBreaks,
+					autoStartPomodoro,
+					customDurations
+				})
+			);
+		} catch (e) {
+			console.error('Failed to save settings:', e);
+		}
+	}
+
+	let initialized = false;
+	let hasCompleted = false; // Prevent multiple completion triggers
+
+	// Load data on mount
+	$effect(() => {
+		if (!browser || initialized) return;
+		loadSessionCount();
+		loadSettings();
+		// Set initial seconds based on loaded custom durations
+		seconds = durations[mode];
+		initialized = true;
+	});
+
+	// Save settings whenever they change (but only after initialization)
+	$effect(() => {
+		if (!initialized) return;
+		// Track dependencies
+		autoStartBreaks;
+		autoStartPomodoro;
+		customDurations;
+		saveSettings();
+	});
+
 	// Timer logic
 	$effect(() => {
 		let interval: ReturnType<typeof setInterval> | undefined;
 
 		if (isRunning && seconds > 0) {
+			// Reset completion flag when timer is running
+			hasCompleted = false;
 			interval = setInterval(() => {
 				seconds--;
 			}, 1000);
-		} else if (seconds === 0) {
+		} else if (seconds === 0 && !hasCompleted) {
+			// Only run completion logic once
+			hasCompleted = true;
 			isRunning = false;
-			// Trigger confetti when pomodoro completes (going into break)
+
 			if (mode === 'pomodoro') {
+				// Increment session counter
+				sessionCount++;
+				consecutivePomodoros++;
+				saveSessionCount();
 				celebrateWithConfetti();
+
+				// Auto-start break if enabled
+				if (autoStartBreaks) {
+					// Use long break every 4 pomodoros
+					const breakMode = consecutivePomodoros % 4 === 0 ? 'long' : 'short';
+					mode = breakMode;
+					seconds = durations[breakMode];
+					isRunning = true;
+				}
+			} else if (mode === 'short' || mode === 'long') {
+				// Auto-start pomodoro if enabled
+				if (autoStartPomodoro) {
+					mode = 'pomodoro';
+					seconds = durations.pomodoro;
+					isRunning = true;
+				}
 			}
 		}
 
@@ -92,12 +237,18 @@
 	function resetTimer() {
 		isRunning = false;
 		seconds = durations[mode];
+		hasCompleted = false;
 	}
 
 	function changeMode(newMode: 'pomodoro' | 'short' | 'long') {
 		mode = newMode;
 		isRunning = false;
 		seconds = durations[newMode];
+		hasCompleted = false;
+		// Reset consecutive pomodoros when manually switching
+		if (newMode !== 'pomodoro') {
+			consecutivePomodoros = 0;
+		}
 	}
 
 	// Dev mode: skip to end
@@ -106,37 +257,52 @@
 	}
 </script>
 
-<div class="min-h-screen flex flex-col items-center justify-center bg-background text-foreground p-4 relative">
+<!-- Navbar -->
+<nav class="fixed top-0 left-0 right-0 py-4 px-6 border-b border-border bg-background/80 backdrop-blur-sm z-40" style="font-family: 'Geist Sans', sans-serif;">
+	<div class="flex items-center justify-between max-w-6xl mx-auto">
+		<h1 class="text-lg font-semibold text-foreground">🍅 Pomo Cook</h1>
+		<div class="flex items-center gap-4">
+			<div class="text-sm text-muted-foreground">
+				🍅 {sessionCount} today
+			</div>
+			<Button
+				onclick={() => (showSettings = !showSettings)}
+				variant="ghost"
+				size="default"
+				class="text-muted-foreground hover:text-foreground"
+				aria-label="Settings"
+			>
+				Settings ⚙️
+			</Button>
+		</div>
+	</div>
+</nav>
+
+<div class="min-h-screen flex flex-col items-center justify-center bg-background text-foreground p-4 relative pt-20">
 	<div class="flex flex-col items-center gap-8 w-full max-w-md">
 		<!-- Mode selector -->
 		<div class="flex gap-2 text-sm">
-			<button
+			<Button
 				onclick={() => changeMode('pomodoro')}
-				class="px-4 py-2 rounded transition-colors {mode === 'pomodoro'
-					? 'bg-primary text-primary-foreground'
-					: 'bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground'}"
+				variant={mode === 'pomodoro' ? 'default' : 'secondary'}
 				style="font-family: 'Geist Sans', sans-serif;"
 			>
 				Pomodoro
-			</button>
-			<button
+			</Button>
+			<Button
 				onclick={() => changeMode('short')}
-				class="px-4 py-2 rounded transition-colors {mode === 'short'
-					? 'bg-primary text-primary-foreground'
-					: 'bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground'}"
+				variant={mode === 'short' ? 'default' : 'secondary'}
 				style="font-family: 'Geist Sans', sans-serif;"
 			>
 				Short Break
-			</button>
-			<button
+			</Button>
+			<Button
 				onclick={() => changeMode('long')}
-				class="px-4 py-2 rounded transition-colors {mode === 'long'
-					? 'bg-primary text-primary-foreground'
-					: 'bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground'}"
+				variant={mode === 'long' ? 'default' : 'secondary'}
 				style="font-family: 'Geist Sans', sans-serif;"
 			>
 				Long Break
-			</button>
+			</Button>
 		</div>
 
 		<!-- Timer display -->
@@ -149,35 +315,113 @@
 
 		<!-- Control buttons -->
 		<div class="flex gap-4">
-			<button
+			<Button
 				onclick={toggleTimer}
-				class="px-8 py-3 text-lg bg-primary text-primary-foreground rounded hover:opacity-90 transition-opacity"
+				size="lg"
+				class="px-8 text-lg"
 				style="font-family: 'Geist Sans', sans-serif;"
 			>
 				{isRunning ? 'Pause' : 'Start'}
-			</button>
-			<button
+			</Button>
+			<Button
 				onclick={resetTimer}
-				class="px-8 py-3 text-lg bg-secondary text-secondary-foreground rounded hover:bg-accent hover:text-accent-foreground transition-colors"
+				variant="secondary"
+				size="lg"
+				class="px-8 text-lg"
 				style="font-family: 'Geist Sans', sans-serif;"
 			>
 				Reset
-			</button>
+			</Button>
 		</div>
 
 		{#if dev}
 			<!-- Dev mode skip button -->
 			<div class="text-xs text-muted-foreground text-center">
-				<button
+				<Button
 					onclick={skipTimer}
-					class="px-3 py-1 text-xs bg-destructive/20 text-destructive rounded hover:bg-destructive/30 transition-colors"
+					variant="destructive"
+					size="sm"
+					class="text-xs bg-destructive/20 hover:bg-destructive/30"
 					style="font-family: 'Geist Sans', sans-serif;"
 				>
 					Skip Timer (or press 'S')
-				</button>
+				</Button>
 			</div>
 		{/if}
 	</div>
+
+	<!-- Settings Modal -->
+	<Dialog.Root bind:open={showSettings}>
+		<Dialog.Content class="sm:max-w-md" style="font-family: 'Geist Sans', sans-serif;">
+			<Dialog.Header>
+				<Dialog.Title>Settings</Dialog.Title>
+			</Dialog.Header>
+
+			<!-- Auto-start options -->
+			<div class="space-y-4 mb-6">
+				<div class="flex items-center gap-3">
+					<Checkbox
+						id="auto-breaks"
+						bind:checked={autoStartBreaks}
+					/>
+					<Label for="auto-breaks" class="text-sm cursor-pointer">Auto-start breaks</Label>
+				</div>
+				<div class="flex items-center gap-3">
+					<Checkbox
+						id="auto-pomodoro"
+						bind:checked={autoStartPomodoro}
+					/>
+					<Label for="auto-pomodoro" class="text-sm cursor-pointer">Auto-start next pomodoro</Label>
+				</div>
+			</div>
+
+			<!-- Custom durations -->
+			<div class="space-y-4 mb-6">
+				<h3 class="text-sm font-medium">Custom Durations (minutes)</h3>
+				<div class="flex items-center gap-3">
+					<Label for="work-duration" class="text-xs text-muted-foreground w-24">Work:</Label>
+					<Input
+						id="work-duration"
+						type="number"
+						bind:value={customDurations.pomodoro}
+						min={1}
+						max={60}
+						class="flex-1"
+					/>
+				</div>
+				<div class="flex items-center gap-3">
+					<Label for="short-duration" class="text-xs text-muted-foreground w-24">Short Break:</Label>
+					<Input
+						id="short-duration"
+						type="number"
+						bind:value={customDurations.short}
+						min={1}
+						max={60}
+						class="flex-1"
+					/>
+				</div>
+				<div class="flex items-center gap-3">
+					<Label for="long-duration" class="text-xs text-muted-foreground w-24">Long Break:</Label>
+					<Input
+						id="long-duration"
+						type="number"
+						bind:value={customDurations.long}
+						min={1}
+						max={60}
+						class="flex-1"
+					/>
+				</div>
+			</div>
+
+			<!-- Close button -->
+			<Button
+				onclick={() => (showSettings = false)}
+				class="w-full"
+			>
+				Close
+			</Button>
+		</Dialog.Content>
+	</Dialog.Root>
 
 	<!-- Footer -->
 	<footer class="fixed bottom-0 left-0 right-0 py-3 px-4 text-center text-xs text-muted-foreground border-t border-border bg-background/80 backdrop-blur-sm" style="font-family: 'Geist Sans', sans-serif;">
